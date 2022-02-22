@@ -89,15 +89,32 @@ function CreateCustomTypeForHarmony() {
       // see here for how this works: https://harmony.pardeike.net/articles/intro.html#how-harmony-works
   
       public static long Version = 1;
+      private static bool _activatePatches = true;
+      public static bool ActivatePatches {
+          get {
+              return _activatePatches;
+          }
+          set {
+            System.Console.WriteLine("[HEU] Setting patches activated to " + value.ToString());
+            Log("[HEU] Setting patches activated to " + value.ToString());
+              _activatePatches = value;
+          }
+      }
+
+      public static bool LogToConsole = false;
+
       public static void ValidateListMetaInfoPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IList list, string listCultureInvariantTitle, ref Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage __result)
       {
-          System.Console.WriteLine("Original ValidateListMetaInfo result for '" + listCultureInvariantTitle + "': " + __result.ToString());
           Log("[HEU] Original ValidateListMetaInfo result for '" + listCultureInvariantTitle + "': " + __result.ToString());
   
+          if (!ActivatePatches)
+          {
+              return;
+          }
+
           // sample of explicitly handling one library by title
           if (listCultureInvariantTitle == "Style Library")
           {
-            System.Console.WriteLine("Changing result for Style Library");
             Log("[HEU] Changing result for Style Library");
             __result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.None;
           }
@@ -108,41 +125,64 @@ function CreateCustomTypeForHarmony() {
     
       public static void IsFilteredListPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IList docLib, ref bool __result)
       {
-          System.Console.WriteLine("Original IsFilteredList result for: '" + docLib.RootFolder.ServerRelativeUrl + "' (BaseTemplate " + docLib.BaseTemplate.ToString() + "): " + __result.ToString());
           Log("[HEU] Original IsFilteredList result for: '" + docLib.RootFolder.ServerRelativeUrl + "' (BaseTemplate " + docLib.BaseTemplate.ToString() + "): " + __result.ToString());
   
+          if (!ActivatePatches)
+          {
+              return;
+          }
           // allow everything, filter nothing...
           __result = false;
       }
   
       public static bool CheckListTemplateMatchPrefix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.PackageSourceType SourceType)
       {
-          System.Console.WriteLine("Skipping schema mismatch check");
           Log("[HEU] Skipping schema mismatch check");
           if (targetList.ListTemplateType != sourceList.ListTemplateType)
           {
-            System.Console.WriteLine("Using the target document library type {0} instead of the default {1} for list {2}", (object) targetList.ListTemplateType, (object) sourceList.ListTemplateType, (object) targetList.Url);
             Log("[HEU] Using the target document library type {0} instead of the default {1} for list {2}", (object) targetList.ListTemplateType, (object) sourceList.ListTemplateType, (object) targetList.Url);
             sourceList.ListTemplateType = targetList.ListTemplateType;
           }
           
+          if (!ActivatePatches)
+          {
+              return true;
+          }
+
           return false;
       }
   
       public static void PostUpdateListSchemaPrefix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList)
       {
           Log("[HEU] PostUpdateListSchemaPrefix");
+
+          if (!ActivatePatches)
+          {
+              return;
+          }
+
           Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract.ContentTypeManageDisable.Add(Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary);
       }
   
       public static void PostUpdateListSchemaPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList)
       {
         Log("[HEU] PostUpdateListSchemaPostfix");
+
+        if (!ActivatePatches)
+        {
+            return;
+        }
+
         Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract.ContentTypeManageDisable.Remove(Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary);
       }
   
       public static void Log(string errorMessage = "", params object[] messageArgs)
       {
+        if (LogToConsole && !errorMessage.Contains("[VER]") && !errorMessage.Contains("[DBG]"))
+        {
+            System.Console.WriteLine(string.Format(errorMessage, messageArgs));
+        }
+
         bool retry;
         // solve concurrency issues by retrying; not pretty, but works
         do
@@ -160,44 +200,42 @@ function CreateCustomTypeForHarmony() {
   
       public static void LogDebugPrefix(string errorMessage = "", params object[] messageArgs)
       {
-        // System.Console.WriteLine("[DBG] " + errorMessage, messageArgs);
         Log("[DBG] " + errorMessage, messageArgs);
       }
   
       public static void LogInformationPrefix(string errorMessage = "", params object[] messageArgs)
       {
-        // System.Console.WriteLine("[INF] " + errorMessage, messageArgs);
         Log("[INF] " + errorMessage, messageArgs);
       }
   
       public static void LogWarningPrefix(string errorMessage = "", params object[] messageArgs)
       {
-        System.Console.WriteLine("[WRN] " + errorMessage, messageArgs);
         Log("[WRN] " + errorMessage, messageArgs);
       }
   
       public static void LogErrorPrefix(string errorMessage = "", params object[] messageArgs)
       {
-        System.Console.WriteLine("[ERR] " + errorMessage, messageArgs);
         Log("[ERR] " + errorMessage, messageArgs);
       }
   
       public static void LogVerbosePrefix(string errorMessage = "", params object[] messageArgs)
       {
-        // System.Console.WriteLine("[VER] " + errorMessage, messageArgs);
         Log("[VER] " + errorMessage, messageArgs);
       }
   
       public static void LogExceptionPrefix(System.Exception e, string errorMessage = "", params object[] messageArgs)
       {
-        System.Console.WriteLine("[EXC] " + errorMessage + " (" + e.ToString() + ")", messageArgs);
         Log("[EXC] " + errorMessage + " (" + e.ToString() + ")", messageArgs);
       }
   
       public static void GetSupportedListTemplatesPostfix(ref System.Collections.Generic.HashSet<Microsoft.SharePoint.Client.ListTemplateType> __result)
       {
-          // note: this is the original SchemaScanSpAbstract.SupportedListTemplates plus added template types we want SPMT to support
-          __result = new System.Collections.Generic.HashSet<Microsoft.SharePoint.Client.ListTemplateType>()
+        if (!ActivatePatches)
+        {
+            return;
+        }
+        // note: this is the original SchemaScanSpAbstract.SupportedListTemplates plus added template types we want SPMT to support
+        __result = new System.Collections.Generic.HashSet<Microsoft.SharePoint.Client.ListTemplateType>()
           {
             Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary,
             Microsoft.SharePoint.Client.ListTemplateType.MySiteDocumentLibrary,
@@ -316,6 +354,13 @@ function PatchSpmt() {
     }
   
     $Global:patched = $true
+
+    if ([SpmtModifications]::ActivatePatches)
+    {
+        Write-Host "Patches are activated" -ForegroundColor Green
+    } else {
+        Write-Host "Patches are disabled" -ForegroundColor Gray
+    }
 }
   
 LoadSpmtPowerShellModule
