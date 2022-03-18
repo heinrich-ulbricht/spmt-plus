@@ -70,7 +70,7 @@ function LoadHarmony() {
 }
   
 function CreateCustomTypeForHarmony() {
-    $Version = 1
+    $Version = 2
   
     $spmtModificationsType = ([System.Management.Automation.PSTypeName]'SpmtModifications').Type
     # check if version matches or if we got an old type in memory
@@ -88,7 +88,7 @@ function CreateCustomTypeForHarmony() {
       // note: __result contains the result value of the called method; in a Harmony postfix method we get the chance to modify the result value
       // see here for how this works: https://harmony.pardeike.net/articles/intro.html#how-harmony-works
   
-      public static long Version = 1;
+      public static long Version = $Version;
       private static bool _activatePatches = true;
       public static bool ActivatePatches {
           get {
@@ -99,6 +99,30 @@ function CreateCustomTypeForHarmony() {
             Log("[HEU] Setting patches activated to " + value.ToString());
               _activatePatches = value;
           }
+      }
+
+      private static bool _skipUpdatingViews = false;
+      public static bool SkipUpdatingViews {
+        get {
+            return _skipUpdatingViews;
+        }
+        set {
+          System.Console.WriteLine("[HEU] Setting SkipUpdatingViews to " + value.ToString());
+          Log("[HEU] Setting SkipUpdatingViews to " + value.ToString());
+          _skipUpdatingViews = value;
+        }
+      }
+
+      private static bool _skipViews = false;
+      public static bool SkipViews {
+        get {
+            return _skipViews;
+        }
+        set {
+          System.Console.WriteLine("[HEU] Setting SkipViews to " + value.ToString());
+          Log("[HEU] Setting SkipViews to " + value.ToString());
+          _skipViews = value;
+        }
       }
 
       public static bool LogToConsole = false;
@@ -121,6 +145,56 @@ function CreateCustomTypeForHarmony() {
     
           // or just allow everything...
           __result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.None;
+      }
+
+      // note: this affects only some special views that already exist at the destination and are deemed internal; it is not called if a view does not yet exists at the destination
+      public static void NeedSkipInternalViewPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo view, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, ref bool __result)
+      {
+        string viewName = view.RelativePathToList.Trim('/');
+        Log("[HEU] Original NeedSkipInternalView result for view '" + viewName + "' on list '" + sourceList.Title + "': " + __result.ToString());
+
+        // note: ActivatePatches is not checked here; skipping is controlled by SkipUpdatingViews instead
+        if (SkipUpdatingViews)
+        {
+            Log("[HEU] Skipping view '" + viewName + "' for list '" + sourceList.Title + "'");
+            // skip all views
+            __result = true;
+        }
+      }
+
+      // this is called for every view of the source list
+      public static bool UpsertViewPrefix(
+        ref Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo __result,
+        Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.ViewMigrator __instance,
+        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo view,
+        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList,
+        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetLibraryInfo
+        )
+      {
+        if (!SkipViews)
+        {
+            return true;
+        }
+        Log("[HEU] Skipping UpsertView for '" + view.Title + "' for source list '" + sourceList.Url + "'");
+        Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaObjectResult result = new Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaObjectResult()
+          {
+            ContentType = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationContentType.View,
+            ContainerType = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationContentType.List,
+            Title = view.Title,
+            SourceId = view.Id,
+            SourceUrl = sourceList.Url,
+            targetUrl = targetLibraryInfo.Url
+          };
+          
+          result.Operation = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationOperation.Skip;
+          // this logs as "Skip the internal view" in the structure report
+          result.Message = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.ViewSkipInternal;
+
+          // result.Result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationResult.Succeed; - don't (seems only to be set for non-skipped views)
+          __instance.ReportMigrationResult(result);
+          __result = view;
+
+          return false;
       }
     
       public static void IsFilteredListPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IList docLib, ref bool __result)
@@ -296,61 +370,82 @@ function PatchSpmt() {
         return
     }
   
-    $harmony = New-Object HarmonyLib.Harmony -ArgumentList "com.heinrich.spmtredirects"
-    $validateListMetaInfoOrig = [Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract].GetMethod("ValidateListMetaInfo", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
-    $validateListMetaInfoPostfix = [SpmtModifications].GetMethod("ValidateListMetaInfoPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)  
-    $patchResult = $harmony.Patch($validateListMetaInfoOrig, $null, (New-Object HarmonyLib.HarmonyMethod -ArgumentList $validateListMetaInfoPostfix))
-    if (-not $patchResult) {
-        throw "Could not patch ValidateListMetaInfo"
-    }
-    else {
-        Write-Host "Patched ValidateListMetaInfo" -ForegroundColor Green
-    }
-    
-    $isFilteredListOrig = [Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SPODocumentAcquirer].GetMethod("IsFilteredList", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
-    $isFilteredListPostfix = [SpmtModifications].GetMethod("IsFilteredListPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
-    $patchResult = $harmony.Patch($isFilteredListOrig, $null, (New-Object HarmonyLib.HarmonyMethod -ArgumentList $isFilteredListPostfix))
-    if (-not $patchResult) {
-        throw "Could not patch IsFilteredList"
-    }
-    else {
-        Write-Host "Patched IsFilteredList" -ForegroundColor Green
-    }
-  
-    $checkListTemplateMatchOrig = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaUtilities].GetMethod("CheckListTemplateMatch", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
-    $checkListTemplateMatchPrefix = [SpmtModifications].GetMethod("CheckListTemplateMatchPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
-    $patchResult = $harmony.Patch($checkListTemplateMatchOrig, (New-Object HarmonyLib.HarmonyMethod -ArgumentList $checkListTemplateMatchPrefix), $null)
-    if (-not $patchResult) {
-        throw "Could not patch CheckListTemplateMatch"
-    }
-    else {
-        Write-Host "Patched CheckListTemplateMatch" -ForegroundColor Green
-    }
-  
-    # remove types you don't want to log
+    $patches = @(
+        @{
+            "origName" = "ValidateListMetaInfo"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract].GetMethod("ValidateListMetaInfo", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("ValidateListMetaInfoPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)  
+        }
+        @{
+            "origName" = "NeedSkipInternalView"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.ViewMigrator].GetMethod("NeedSkipInternalView", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("NeedSkipInternalViewPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "IsFilteredList"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SPODocumentAcquirer].GetMethod("IsFilteredList", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("IsFilteredListPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "CheckListTemplateMatch"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaUtilities].GetMethod("CheckListTemplateMatch", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPrefix" = [SpmtModifications].GetMethod("CheckListTemplateMatchPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }                  
+        @{
+            "origName" = "UpsertView"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.ViewMigrator].GetMethod("UpsertView", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::Public)
+            "methodPrefix" = [SpmtModifications].GetMethod("UpsertViewPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }                  
+    )
+    # patch all logging methods as well
     $logTypes = "Information", "Error", "Warning", "Exception", "Debug", "Verbose"
     foreach ($logType in $logTypes) {
-        $logDebugOrig = [Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MigObjectAbstract].GetMethod("Log$($logType)", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::Public)
-        $logDebugPrefix = [SpmtModifications].GetMethod("Log$($logType)Prefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
-        $patchResult = $harmony.Patch($logDebugOrig, (New-Object HarmonyLib.HarmonyMethod -ArgumentList $logDebugPrefix), $null)
-        if (-not $patchResult) {
-            throw "Could not patch Log$($logType)"
+        $patch = @{
+            "origName" = "Log$($logType)"
+            "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MigObjectAbstract].GetMethod("Log$($logType)", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::Public)
+            "methodPrefix" = [SpmtModifications].GetMethod("Log$($logType)Prefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
         }
-        else {
-            Write-Host "Patched Log$($logType)" -ForegroundColor Green
-        }
+        $patches += $patch
     }
-  
+
+    # a bit more work for getter
     $prop = [Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract].GetProperty("SupportedListTemplates", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
     $getter = $prop.GetAccessors()
-    $getSupportedListTemplatesOrig = $getter[0]
-    $getSupportedListTemplatesPostfix = [SpmtModifications].GetMethod("GetSupportedListTemplatesPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
-    $patchResult = $harmony.Patch($getSupportedListTemplatesOrig, $null, (New-Object HarmonyLib.HarmonyMethod -ArgumentList $getSupportedListTemplatesPostfix))  
-    if (-not $patchResult) {
-        throw "Could not patch GetSupportedListTemplates"
+    $patch = @{
+        "origName" = "GetSupportedListTemplates"
+        "methodOrig" = $getter[0]
+        "methodPrefix" = $null
+        "methodPostfix" = [SpmtModifications].GetMethod("GetSupportedListTemplatesPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
     }
-    else {
-        Write-Host "Patched GetSupportedListTemplates" -ForegroundColor Green
+    $patches += $patch    
+
+    # apply patches
+    foreach ($patch in $patches)
+    {
+        $harmony = New-Object HarmonyLib.Harmony -ArgumentList "com.heinrich.spmtredirects"
+
+        $prefix = $null
+        $postfix = $null
+        if ($patch.methodPrefix) {
+            $prefix = (New-Object HarmonyLib.HarmonyMethod -ArgumentList $patch.methodPrefix)
+        }
+        if ($patch.methodPostfix) {
+            $postfix = (New-Object HarmonyLib.HarmonyMethod -ArgumentList $patch.methodPostfix)
+        }
+
+        $patchResult = $harmony.Patch($patch.methodOrig, $prefix, $postfix)
+        if (-not $patchResult) {
+            throw "Could not patch $($patch.origName)"
+        }
+        else {
+            Write-Host "Patched $($patch.origName)" -ForegroundColor Green
+        }
     }
   
     $Global:patched = $true
@@ -360,6 +455,20 @@ function PatchSpmt() {
         Write-Host "Patches are activated" -ForegroundColor Green
     } else {
         Write-Host "Patches are disabled" -ForegroundColor Gray
+    }
+
+    if ([SpmtModifications]::SkipUpdatingViews)
+    {
+        Write-Host "Skipping updating views is activated" -ForegroundColor Green
+    } else {
+        Write-Host "Skipping updating views is disabled" -ForegroundColor Gray
+    }
+
+    if ([SpmtModifications]::SkipView)
+    {
+        Write-Host "Skipping views is activated" -ForegroundColor Green
+    } else {
+        Write-Host "Skipping views is disabled" -ForegroundColor Gray
     }
 }
   
