@@ -49,12 +49,18 @@ There are some side effects, e.g. the check for audience targeted lists is also 
 
 ## How to use this script
 
+Make sure the prerequisites are in place and run the script.
+### Prerequisites
+
 - install the *SharePoint Migration Tool* first - it comes with PowerShell cmdlets you will use to migrate (sorry, no UI)
   - note: those cmdlets will be patched
 - download Harmony and extract the *0Harmony.dll* from the [zip file](https://github.com/pardeike/Harmony/releases/tag/v2.2.0.0) (I successfully used the net4.8 variant):
     - put 0Harmony.dll in the same folder as the script _or_ in the current directory; the script looks in both places
-- run the script
-    - the console should be free of red error messages and only contain green or white status messages
+
+### Run the script
+
+
+- the console should be free of red error messages and only contain green or white status messages
 - include this script into your migration script to patch SPMT before starting the migration with *Start-SPMTMigration*
 - the script can be safely run multiple times
 
@@ -66,11 +72,19 @@ A successful script run will look like this:
 This script has been tested with:
 - Visual Studio Code with PowerShell extension
     - note: VS Code sometimes liked to crash after restarting the PowerShell session - just restart VS Code in this case
-    - note: PowerShell ISE should also work but added console output from the patched methods might be missing
-- SPMT Prerelease 3.5.123.2
+    - note: PowerShell ISE should also work
+- SPMT 3.5.123.3
 - PowerShell 5.1
 - Harmony 2.2.0.0, .NET 4.8 DLL
 - SharePoint 2013 Server to SharePoint Online migration
+
+### Configuration
+
+`[SpmtModifications]::ActivatePatches` can be used to activate or deactivate the majority of patches.
+
+`[SpmtModifications]::SkipViews` can be used to skip all list views from migration.
+
+`[SpmtModifications]::LogToConsole` can be used to toggle console output for log messages. Note: console output interfers with the SPMT progress indicator in Visual Studio Code.
 
 ## Notes
 
