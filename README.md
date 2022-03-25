@@ -18,12 +18,9 @@ The SharePoint Migration Tool only supportes certain SharePoint list templates.
 
 |**List template ID**|**Name**|**Description**|**Supported by SPMT**|
 |:-----|:-----|:-----|:-----|
-|-1|InvalidType|Not used. Value = -1|No|
-|0|NoListTemplate|unspecified list type. Value = 0|No|
 |100|GenericList|Custom list. Value = 100|Yes|
 |101|DocumentLibrary|Document library. Value = 101|Yes|
 ||*Snip - lots of entries here*||
-|1220|HealthRules|Health Rules. Value = 1220|No|
 |1221|HealthReports|Health Reports. Value = 1221|No|
 |1230|DeveloperSiteDraftApps|Draft Apps library in Developer Site. Value = 1230|No|
 
@@ -37,12 +34,15 @@ We ended up patching SPMT to force it to migrate those libraries nevertheless.
 
 This features can be activated via
 
-`[SpmtModifications]::SkipListTemplateTypeCompatibilityCheck = $true`
+```powershell
+[SpmtModifications]::SkipListTemplateTypeCompatibilityCheck = $true
+```
 
 Additional template types can be registered via
 
-`[SpmtModifications]::AdditionalListTemplateTypesToSupport.Add(10015)`
-
+```powershell
+[SpmtModifications]::AdditionalListTemplateTypesToSupport.Add(10015)
+```
 
 ### How SPMT normally rejects certain lists and libraries
 
@@ -67,9 +67,13 @@ There are some side effects, e.g. the check for audience targeted lists is also 
 
 ## Don't migrate list views
 
-We had a scenario where we needed to migrate several document libraries from the source system into one document library in the taret system. Unfortunately this also migrates all views from all source doc libs to the target doc lib.
+We had a scenario where we needed to migrate several document libraries from the source system into one document library in the target system. Unfortunately this also migrates all views from all source doc libs to the target doc lib.
 
-This can now be deactivated via `[SpmtModifications]::SkipViewMigration = $true`.
+Views can now be skipped via
+
+```powershell
+[SpmtModifications]::SkipViewMigration = $true
+```
 
 ## Support SharePoint Online (SPO) as source system
 
