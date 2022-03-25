@@ -1,5 +1,5 @@
 <#
-    Notes: 
+    Notes:
     - have SPMT intalled
     - put 0Harmony.dll in the script directory
     - run the script
@@ -12,18 +12,18 @@ function LoadSpmtPowerShellModule() {
         Write-Host "SPMT PowerShell module is loaded, good"
         return
     }
-    
+
     $currentLocation = Get-Location
     $spmtModulePath = "$($env:UserProfile)\Documents\WindowsPowerShell\Modules\Microsoft.SharePoint.MigrationTool.PowerShell"
     Write-Host "Importing SPMT PowerShell module from '$spmtModulePath'"
     if (-not (Get-Item $spmtModulePath -ErrorAction SilentlyContinue).Exists) {
         throw "SharePoint Migration Toolkit PowerShell Module expected but not found in '$spmtModulePath'"
-  
+
     }
-    Set-Location $spmtModulePath
+    $null = Set-Location $spmtModulePath
     $null = Import-Module "Microsoft.SharePoint.MigrationTool.PowerShell"
-    Set-Location $currentLocation
-  
+    $null = Set-Location $currentLocation
+
     if (Get-Module Microsoft.SharePoint.MigrationTool.PowerShell) {
         Write-Host "SPMT PowerShell module loaded" -ForegroundColor Green
     }
@@ -31,14 +31,14 @@ function LoadSpmtPowerShellModule() {
         throw "SPMT PowerShell module not loaded, cannot continue"
     }
 }
-  
+
 function LoadHarmony() {
     $harmonyType = ([System.Management.Automation.PSTypeName]'HarmonyLib.Harmony').Type
     if ($harmonyType) {
         Write-Host "Harmony is already loaded, good"
         return
     }
-  
+
     $harmonyDllPath = "0Harmony.dll"
     if (-not (Get-Item $harmonyDllPath -ErrorAction SilentlyContinue).Exists) {
         if ($PSScriptRoot) {
@@ -53,25 +53,25 @@ function LoadHarmony() {
         }
     }
     Write-Host "Found Harmony DLL at path '$harmonyDllPath'" -ForegroundColor Green
-  
+
     $null = Add-Type -LiteralPath $harmonyDllPath
     $harmonyType = ([System.Management.Automation.PSTypeName]'HarmonyLib.Harmony').Type
     if ($harmonyType) {
         $harmonyTargetFramework = [HarmonyLib.Harmony].Assembly.CustomAttributes |
-        Where-Object { $_.AttributeType.Name -eq "TargetFrameworkAttribute" } | 
-        Select-Object -ExpandProperty ConstructorArguments | 
+        Where-Object { $_.AttributeType.Name -eq "TargetFrameworkAttribute" } |
+        Select-Object -ExpandProperty ConstructorArguments |
         Select-Object -ExpandProperty value
-  
+
         Write-Host "Harmony is loaded; version: $([HarmonyLib.Harmony].Assembly.GetName().Version.ToString()); ImageRuntimeVersion: $([HarmonyLib.Harmony].Assembly.ImageRuntimeVersion); TargetFramework: $($harmonyTargetFramework)" -ForegroundColor Green
     }
     else {
         throw "Harmony not loaded"
     }
 }
-  
+
 function CreateCustomTypeForHarmony() {
     $Version = 2
-  
+
     $spmtModificationsType = ([System.Management.Automation.PSTypeName]'SpmtModifications').Type
     # check if version matches or if we got an old type in memory
     if ($spmtModificationsType) {
@@ -81,301 +81,69 @@ function CreateCustomTypeForHarmony() {
         Write-Host "Found existing custom SPMT modification type, good"
         return
     }
-  
-    $Source = @"
-    public class SpmtModifications
-    {
-      // note: __result contains the result value of the called method; in a Harmony postfix method we get the chance to modify the result value
-      // see here for how this works: https://harmony.pardeike.net/articles/intro.html#how-harmony-works
-  
-      public static long Version = $Version;
-      private static bool _activatePatches = true;
-      public static bool ActivatePatches {
-          get {
-              return _activatePatches;
-          }
-          set {
-            System.Console.WriteLine("[HEU] Setting patches activated to " + value.ToString());
-            Log("[HEU] Setting patches activated to " + value.ToString());
-              _activatePatches = value;
-          }
-      }
 
-      private static bool _skipUpdatingViews = false;
-      public static bool SkipUpdatingViews {
-        get {
-            return _skipUpdatingViews;
-        }
-        set {
-          System.Console.WriteLine("[HEU] Setting SkipUpdatingViews to " + value.ToString());
-          Log("[HEU] Setting SkipUpdatingViews to " + value.ToString());
-          _skipUpdatingViews = value;
-        }
-      }
-
-      private static bool _skipViews = false;
-      public static bool SkipViews {
-        get {
-            return _skipViews;
-        }
-        set {
-          System.Console.WriteLine("[HEU] Setting SkipViews to " + value.ToString());
-          Log("[HEU] Setting SkipViews to " + value.ToString());
-          _skipViews = value;
-        }
-      }
-
-      public static bool LogToConsole = false;
-
-      public static void ValidateListMetaInfoPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IList list, string listCultureInvariantTitle, ref Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage __result)
-      {
-          Log("[HEU] Original ValidateListMetaInfo result for '" + listCultureInvariantTitle + "': " + __result.ToString());
-  
-          if (!ActivatePatches)
-          {
-              return;
-          }
-
-          // sample of explicitly handling one library by title
-          if (listCultureInvariantTitle == "Style Library")
-          {
-            Log("[HEU] Changing result for Style Library");
-            __result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.None;
-          }
-    
-          // or just allow everything...
-          __result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.None;
-      }
-
-      // note: this affects only some special views that already exist at the destination and are deemed internal; it is not called if a view does not yet exists at the destination
-      public static void NeedSkipInternalViewPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo view, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, ref bool __result)
-      {
-        string viewName = view.RelativePathToList.Trim('/');
-        Log("[HEU] Original NeedSkipInternalView result for view '" + viewName + "' on list '" + sourceList.Title + "': " + __result.ToString());
-
-        // note: ActivatePatches is not checked here; skipping is controlled by SkipUpdatingViews instead
-        if (SkipUpdatingViews)
-        {
-            Log("[HEU] Skipping view '" + viewName + "' for list '" + sourceList.Title + "'");
-            // skip all views
-            __result = true;
-        }
-      }
-
-      // this is called for every view of the source list
-      public static bool UpsertViewPrefix(
-        ref Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo __result,
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.ViewMigrator __instance,
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ViewMetaInfo view,
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList,
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetLibraryInfo
-        )
-      {
-        if (!SkipViews)
-        {
-            return true;
-        }
-        Log("[HEU] Skipping UpsertView for '" + view.Title + "' for source list '" + sourceList.Url + "'");
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaObjectResult result = new Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaObjectResult()
-          {
-            ContentType = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationContentType.View,
-            ContainerType = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationContentType.List,
-            Title = view.Title,
-            SourceId = view.Id,
-            SourceUrl = sourceList.Url,
-            targetUrl = targetLibraryInfo.Url
-          };
-          
-          result.Operation = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationOperation.Skip;
-          // this logs as "Skip the internal view" in the structure report
-          result.Message = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationMessage.ViewSkipInternal;
-
-          // result.Result = Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaMigrationResult.Succeed; - don't (seems only to be set for non-skipped views)
-          __instance.ReportMigrationResult(result);
-          __result = view;
-
-          return false;
-      }
-    
-      public static void IsFilteredListPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IList docLib, ref bool __result)
-      {
-          Log("[HEU] Original IsFilteredList result for: '" + docLib.RootFolder.ServerRelativeUrl + "' (BaseTemplate " + docLib.BaseTemplate.ToString() + "): " + __result.ToString());
-  
-          if (!ActivatePatches)
-          {
-              return;
-          }
-          // allow everything, filter nothing...
-          __result = false;
-      }
-  
-      public static bool CheckListTemplateMatchPrefix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.PackageSourceType SourceType)
-      {
-          Log("[HEU] Skipping schema mismatch check");
-          if (targetList.ListTemplateType != sourceList.ListTemplateType)
-          {
-            Log("[HEU] Using the target document library type {0} instead of the default {1} for list {2}", (object) targetList.ListTemplateType, (object) sourceList.ListTemplateType, (object) targetList.Url);
-            sourceList.ListTemplateType = targetList.ListTemplateType;
-          }
-          
-          if (!ActivatePatches)
-          {
-              return true;
-          }
-
-          return false;
-      }
-  
-      public static void PostUpdateListSchemaPrefix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList)
-      {
-          Log("[HEU] PostUpdateListSchemaPrefix");
-
-          if (!ActivatePatches)
-          {
-              return;
-          }
-
-          Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract.ContentTypeManageDisable.Add(Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary);
-      }
-  
-      public static void PostUpdateListSchemaPostfix(Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo sourceList, Microsoft.SharePoint.MigrationTool.MigrationLib.Common.ListMetaInfo targetList)
-      {
-        Log("[HEU] PostUpdateListSchemaPostfix");
-
-        if (!ActivatePatches)
-        {
-            return;
-        }
-
-        Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract.ContentTypeManageDisable.Remove(Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary);
-      }
-  
-      public static void Log(string errorMessage = "", params object[] messageArgs)
-      {
-        if (LogToConsole && !errorMessage.Contains("[VER]") && !errorMessage.Contains("[DBG]"))
-        {
-            System.Console.WriteLine(string.Format(errorMessage, messageArgs));
-        }
-
-        bool retry;
-        // solve concurrency issues by retrying; not pretty, but works
-        do
-        {
-          try
-          {
-            System.IO.File.AppendAllText("spmtplus.log", string.Format(errorMessage+System.Environment.NewLine, messageArgs));
-            retry = false;
-          } catch
-          {
-            retry = true;
-          }
-        } while (retry);
-      }
-  
-      public static void LogDebugPrefix(string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[DBG] " + errorMessage, messageArgs);
-      }
-  
-      public static void LogInformationPrefix(string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[INF] " + errorMessage, messageArgs);
-      }
-  
-      public static void LogWarningPrefix(string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[WRN] " + errorMessage, messageArgs);
-      }
-  
-      public static void LogErrorPrefix(string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[ERR] " + errorMessage, messageArgs);
-      }
-  
-      public static void LogVerbosePrefix(string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[VER] " + errorMessage, messageArgs);
-      }
-  
-      public static void LogExceptionPrefix(System.Exception e, string errorMessage = "", params object[] messageArgs)
-      {
-        Log("[EXC] " + errorMessage + " (" + e.ToString() + ")", messageArgs);
-      }
-  
-      public static void GetSupportedListTemplatesPostfix(ref System.Collections.Generic.HashSet<Microsoft.SharePoint.Client.ListTemplateType> __result)
-      {
-        if (!ActivatePatches)
-        {
-            return;
-        }
-        // note: this is the original SchemaScanSpAbstract.SupportedListTemplates plus added template types we want SPMT to support
-        __result = new System.Collections.Generic.HashSet<Microsoft.SharePoint.Client.ListTemplateType>()
-          {
-            Microsoft.SharePoint.Client.ListTemplateType.DocumentLibrary,
-            Microsoft.SharePoint.Client.ListTemplateType.MySiteDocumentLibrary,
-            Microsoft.SharePoint.Client.ListTemplateType.PictureLibrary,
-            Microsoft.SharePoint.Client.ListTemplateType.Announcements,
-            Microsoft.SharePoint.Client.ListTemplateType.Contacts,
-            Microsoft.SharePoint.Client.ListTemplateType.GanttTasks,
-            Microsoft.SharePoint.Client.ListTemplateType.GenericList,
-            Microsoft.SharePoint.Client.ListTemplateType.DiscussionBoard,
-            Microsoft.SharePoint.Client.ListTemplateType.Events,
-            Microsoft.SharePoint.Client.ListTemplateType.IssueTracking,
-            Microsoft.SharePoint.Client.ListTemplateType.Links,
-            Microsoft.SharePoint.Client.ListTemplateType.Tasks,
-            Microsoft.SharePoint.Client.ListTemplateType.Survey,
-            Microsoft.SharePoint.Client.ListTemplateType.TasksWithTimelineAndHierarchy,
-            Microsoft.SharePoint.Client.ListTemplateType.XMLForm,
-            Microsoft.SharePoint.Client.ListTemplateType.Posts,
-            Microsoft.SharePoint.Client.ListTemplateType.Comments,
-            Microsoft.SharePoint.Client.ListTemplateType.Categories,
-            Microsoft.SharePoint.Client.ListTemplateType.CustomGrid,
-            Microsoft.SharePoint.Client.ListTemplateType.WebPageLibrary,
-            Microsoft.SharePoint.Client.ListTemplateType.PromotedLinks,
-            (Microsoft.SharePoint.Client.ListTemplateType) 500,
-            (Microsoft.SharePoint.Client.ListTemplateType) 851,
-            (Microsoft.SharePoint.Client.ListTemplateType) 880,
-            (Microsoft.SharePoint.Client.ListTemplateType) 1302,
-            (Microsoft.SharePoint.Client.ListTemplateType) 10015,
-            (Microsoft.SharePoint.Client.ListTemplateType) 10017,
-            (Microsoft.SharePoint.Client.ListTemplateType) 10018,
-            (Microsoft.SharePoint.Client.ListTemplateType) 10019,
-            (Microsoft.SharePoint.Client.ListTemplateType) 5001, // added: Nintex
-            (Microsoft.SharePoint.Client.ListTemplateType) 550, // added: Social
-            (Microsoft.SharePoint.Client.ListTemplateType) 544 // added: MicroFeed
-            // [EXTENSION POINT] add the types you need; don't forget the comma in the previous line
-          }; 
-      } 
-    }
-"@
-  
+    $source = Get-Content -Path "$PSScriptRoot\SpmtPatch.cs" -Encoding UTF8 -Raw
     $spmtModule = Get-Module "Microsoft.SharePoint.MigrationTool.PowerShell"
     $spmtModulePath = (Get-Item $spmtModule.Path).Directory.FullName
-  
+
     Write-Host "Loading types from SPMT module path '$spmtModulePath'"
-    [void][reflection.assembly]::LoadFrom("$spmtModulePath\microsoft.sharepoint.migrationtool.migrationlib.dll")
-    $null = Add-Type -TypeDefinition $Source -ReferencedAssemblies "mscorlib", "$spmtModulePath\microsoft.sharepoint.client.dll", "$spmtModulePath\microsoft.sharepoint.migrationtool.migrationlib.dll", "System.Console", "$spmtModulePath\microsoft.sharepoint.client.runtime.dll", "System.Core", "System.Runtime" -ErrorAction Continue
-  
+    $null = Add-Type -Path "$spmtModulePath\microsoft.sharepoint.migrationtool.migrationlib.dll"
+    $null = Add-Type -Path "$spmtModulePath\Microsoft.Identity.Client.dll"
+    $null = Add-Type `
+        -TypeDefinition $source `
+        -ReferencedAssemblies "mscorlib",
+            "System",
+            "System.Core",
+            "System.Management.Automation",
+            "System.Data",
+            "System.Data.DataSetExtensions",
+            "System.Drawing",
+            "System.IdentityModel",
+            "System.Net.Http",
+            "System.Windows.Forms",
+            "System.Xml",
+            "System.Xml.Linq",
+            "System.Numerics",
+            "System.Runtime.Serialization",
+            "Microsoft.Extensions.Configuration",
+            "Microsoft.Extensions.Configuration.Abstractions",
+            "Microsoft.Extensions.DependencyInjection",
+            "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "Microsoft.Extensions.Logging",
+            "Microsoft.Extensions.Logging.Abstractions",
+            "Microsoft.Extensions.Options",
+            "Microsoft.Extensions.Primitives",
+            "Microsoft.CSharp",
+            "$spmtModulePath\Microsoft.Identity.Client.dll",
+            "$spmtModulePath\microsoft.sharepoint.client.dll",
+            "$spmtModulePath\microsoft.sharepoint.client.runtime.dll",
+            "$spmtModulePath\microsoft.sharepoint.migrationtool.migrationlib.dll",
+            "$spmtModulePath\microsoft.sharepoint.migration.common.dll",
+            "$spmtModulePath\microsoft.sharepoint.migrationtool.powershell.dll",
+            "$spmtModulePath\Microsoft.Identity.Client.Extensions.Msal.dll" `
+        -IgnoreWarnings `
+        -ErrorAction Continue
+
     $spmtModificationsType = ([System.Management.Automation.PSTypeName]'SpmtModifications').Type
     if (-not $spmtModificationsType) {
         throw "Could not create SpmtModifications type"
     }
-  
+
     Write-Host "Created custom SPMT modification type" -ForegroundColor Green
 }
-  
+
 function PatchSpmt() {
     if ($Global:patched) {
         Write-Host "SPMT methods are already patched, good"
         return
     }
-  
+
     $patches = @(
         @{
             "origName" = "ValidateListMetaInfo"
             "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SchemaScanSpAbstract].GetMethod("ValidateListMetaInfo", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::NonPublic)
             "methodPrefix" = $null
-            "methodPostfix" = [SpmtModifications].GetMethod("ValidateListMetaInfoPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)  
+            "methodPostfix" = [SpmtModifications].GetMethod("ValidateListMetaInfoPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
         }
         @{
             "origName" = "NeedSkipInternalView"
@@ -394,13 +162,97 @@ function PatchSpmt() {
             "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.SchemaUtilities].GetMethod("CheckListTemplateMatch", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
             "methodPrefix" = [SpmtModifications].GetMethod("CheckListTemplateMatchPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
             "methodPostfix" = $null
-        }                  
+        }
         @{
             "origName" = "UpsertView"
             "methodOrig" = [Microsoft.SharePoint.MigrationTool.MigrationLib.Schema.ViewMigrator].GetMethod("UpsertView", [System.Reflection.BindingFlags]::Instance + [System.Reflection.BindingFlags]::Public)
             "methodPrefix" = [SpmtModifications].GetMethod("UpsertViewPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
             "methodPostfix" = $null
-        }                  
+        }
+        @{
+            "origName" = "CheckOnPremSiteAccessibility"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.PowerShell.MigrationFeasibilityChecker"), "CheckOnPremSiteAccessibility")
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("CheckOnPremSiteAccessibilityPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "GetSPOnPremDocumentList"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SPODocumentAcquirer"), "GetSPOnPremDocumentList")
+            "methodPrefix" = [SpmtModifications].GetMethod("GetSPOnPremDocumentListPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "SPODocumentAcquirer.CreateContext"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SPODocumentAcquirer"), "CreateContext")
+            "methodPrefix" = [SpmtModifications].GetMethod("SPODocumentAcquirer_CreateContextPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "SharePointContext.CreateContext"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SharePointContext"), "CreateContext")
+            "methodPrefix" = [SpmtModifications].GetMethod("SharePointContext_CreateContextPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "CreateClientContext"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MIGUtilities"), "CreateClientContext")
+            "methodPrefix" = [SpmtModifications].GetMethod("CreateClientContextPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = [SpmtModifications].GetMethod("CreateClientContextPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "InitAuthorizationHeader"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.MigSPOnlineClientContext"), "InitAuthorizationHeader")
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("InitAuthorizationHeaderPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "AcquireAccessToken"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.AADContext"), "AcquireAccessToken", @([string], [string], [System.Security.SecureString], [bool]))
+            "methodPrefix" = [SpmtModifications].GetMethod("AcquireAccessTokenPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = [SpmtModifications].GetMethod("AcquireAccessTokenPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "IsSourceVersionSupported"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MIGUtilities"), "IsSourceVersionSupported", [int])
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("IsSourceVersionSupportedPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "IsSourceVersionSupported2"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MIGUtilities"), "IsSourceVersionSupported", [Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.IMigSPEnvironment])
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("IsSourceVersionSupported2Postfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "AssessSpSiteAdmin"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Assessment.SourceProviderAbstract"), "AssessSpSiteAdmin")
+            "methodPrefix" = [SpmtModifications].GetMethod("AssessSpSiteAdminPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = [SpmtModifications].GetMethod("AssessSpSiteAdminPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
+        @{
+            "origName" = "SharePointContext.ctor"
+            "methodOrig" = [HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SharePointContext").GetMember(".ctor")[0]
+            "methodPrefix" = [SpmtModifications].GetMethod("SharePointContext_ctorPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "OpenBinaryDirect"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.FileProxy"), "OpenBinaryDirect")
+            "methodPrefix" = [SpmtModifications].GetMethod("OpenBinaryDirectPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "GetHttpResponse"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.Net.RestApiSDK"), "GetHttpResponse")
+            "methodPrefix" = [SpmtModifications].GetMethod("GetHttpResponsePrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
+        @{
+            "origName" = "BeginProcessing"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.PowerShell.AddSPMTTask"), "BeginProcessing")
+            "methodPrefix" = [SpmtModifications].GetMethod("ProcessRecordPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+            "methodPostfix" = $null
+        }
     )
     # patch all logging methods as well
     $logTypes = "Information", "Error", "Warning", "Exception", "Debug", "Verbose"
@@ -423,7 +275,7 @@ function PatchSpmt() {
         "methodPrefix" = $null
         "methodPostfix" = [SpmtModifications].GetMethod("GetSupportedListTemplatesPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
     }
-    $patches += $patch    
+    $patches += $patch
 
     # apply patches
     foreach ($patch in $patches)
@@ -447,31 +299,31 @@ function PatchSpmt() {
             Write-Host "Patched $($patch.origName)" -ForegroundColor Green
         }
     }
-  
+
     $Global:patched = $true
 
-    if ([SpmtModifications]::ActivatePatches)
+    if ([SpmtModifications]::SkipListTemplateTypeCompatibilityCheck)
     {
-        Write-Host "Patches are activated" -ForegroundColor Green
+        Write-Host "SkipListTemplateTypeCompatibilityCheck is activated" -ForegroundColor Green
     } else {
-        Write-Host "Patches are disabled" -ForegroundColor Gray
+        Write-Host "SkipListTemplateTypeCompatibilityCheck is disabled" -ForegroundColor Gray
     }
 
-    if ([SpmtModifications]::SkipUpdatingViews)
+    if ([SpmtModifications]::SkipUpdatingExistingViews)
     {
-        Write-Host "Skipping updating views is activated" -ForegroundColor Green
+        Write-Host "SkipUpdatingExistingViews is activated" -ForegroundColor Green
     } else {
-        Write-Host "Skipping updating views is disabled" -ForegroundColor Gray
+        Write-Host "SkipUpdatingExistingViews is disabled" -ForegroundColor Gray
     }
 
-    if ([SpmtModifications]::SkipView)
+    if ([SpmtModifications]::SkipViewMigration)
     {
-        Write-Host "Skipping views is activated" -ForegroundColor Green
+        Write-Host "SkipViewMigration is activated" -ForegroundColor Green
     } else {
-        Write-Host "Skipping views is disabled" -ForegroundColor Gray
+        Write-Host "SkipViewMigration is disabled" -ForegroundColor Gray
     }
 }
-  
+
 LoadSpmtPowerShellModule
 LoadHarmony
 CreateCustomTypeForHarmony
