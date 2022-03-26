@@ -205,7 +205,7 @@ public class SpmtModifications
         else
         {
             Log("[HEU] Creating userContext, did not find credentials for site '{0}'; using dummy credential", siteUrl);
-            return null;
+            return new UserContext("", "");
         }
     }
 
@@ -232,6 +232,18 @@ public class SpmtModifications
             Log("[HEU] CreateClientContextPrefix: creating userContext for site '{0}'", siteUrl);
             userContext = CreateUserContextForSite(siteUrl);
         }
+    }
+
+    public static void CanCreateOnPremClientContextPostfix(ref bool __result, SPAuthentication spAuth)
+    {
+        if (!EnableSharePointOnlineAsSource)
+        {
+            return;
+        }
+
+        Log("[HEU] CanCreateOnPremClientContext: would return '{0}'; forcing 'false'", __result);
+
+        __result = false;
     }
 
     public static void InitAuthorizationHeaderPostfix(
@@ -421,7 +433,7 @@ public class SpmtModifications
             }
             IEnumerable<IAccount> result = ___app.GetAccountsAsync().Result;
             Log("[HEU] Got {0} authenticated accounts: {1}", result.Count(), string.Join(", ", result.Select(a => a.Username)));
-            var account = result.Where(a => a.Username == username).FirstOrDefault();
+            var account = result.Where(a => a.Username.Equals(username, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
             if (null != account)
             {
                 Log("[HEU] Found authenticated account for user name {0}", username);
@@ -660,16 +672,16 @@ public class SpmtModifications
         {
             Log("[HEU] Changing /_vti_history/ URL " + requestUrl);
 
-            var pattern = "(https://.+)/sites/.+/(_vti_history/([0-9]+)/)";
+            var pattern = "(https://.+)(/(?:sites|personal)/.+/)(_vti_history/([0-9]+)/)";
             var s = requestUrl; // https://contoso.sharepoint.com/sites/2022-03-22-spmt-source/_vti_history/512/Freigegebene%20Dokumente/Requirements.docx
             var matches = Regex.Matches(s, pattern, RegexOptions.IgnoreCase);
             var hostUrl = matches[0].Groups[1].Value; // https://contoso.sharepoint.com
-            var historyPart = matches[0].Groups[2].Value; // _vti_history/512/
-            var version = matches[0].Groups[3].Value; // 512
+            var siteUrlPart = matches[0].Groups[2].Value; // /sites/2022-03-22-spmt-source/
+            var historyPart = matches[0].Groups[3].Value; // _vti_history/512/
+            var version = matches[0].Groups[4].Value; // 512
             var documentUri = new Uri(s.Replace(historyPart, "")); // https://contoso.sharepoint.com/sites/2022-03-22-spmt-source/Freigegebene Dokumente/Requirements.docx
             var serverRelativeUrl = documentUri.AbsolutePath;
-            var restUrl = hostUrl + "/sites/2022-03-22-spmt-source/_api/web/GetFileByServerRelativeUrl('" + serverRelativeUrl + "')/versions(" + version + ")/`$value"; // https://contoso.sharepoint.com/sites/2022-03-22-spmt-source/_api/web/GetFileByServerRelativeUrl('/sites/2022-03-22-spmt-source/Freigegebene%20Dokumente/Requirements.docx')/versions(512)/$value
-            Log("[HEU] New REST URL for version {0}: {1}", version, restUrl);
+            var restUrl = hostUrl + siteUrlPart + "_api/web/GetFileByServerRelativeUrl('" + serverRelativeUrl + "')/versions(" + version + ")/$value"; // https://contoso.sharepoint.com/sites/2022-03-22-spmt-source/_api/web/GetFileByServerRelativeUrl('/sites/2022-03-22-spmt-source/Freigegebene%20Dokumente/Requirements.docx')/versions(512)/$value
             requestUrl = restUrl;
         }
     }

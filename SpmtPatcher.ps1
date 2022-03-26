@@ -92,28 +92,6 @@ function CreateCustomTypeForHarmony() {
     $null = Add-Type `
         -TypeDefinition $source `
         -ReferencedAssemblies "mscorlib",
-            "System",
-            "System.Core",
-            "System.Management.Automation",
-            "System.Data",
-            "System.Data.DataSetExtensions",
-            "System.Drawing",
-            "System.IdentityModel",
-            "System.Net.Http",
-            "System.Windows.Forms",
-            "System.Xml",
-            "System.Xml.Linq",
-            "System.Numerics",
-            "System.Runtime.Serialization",
-            "Microsoft.Extensions.Configuration",
-            "Microsoft.Extensions.Configuration.Abstractions",
-            "Microsoft.Extensions.DependencyInjection",
-            "Microsoft.Extensions.DependencyInjection.Abstractions",
-            "Microsoft.Extensions.Logging",
-            "Microsoft.Extensions.Logging.Abstractions",
-            "Microsoft.Extensions.Options",
-            "Microsoft.Extensions.Primitives",
-            "Microsoft.CSharp",
             "$spmtModulePath\Microsoft.Identity.Client.dll",
             "$spmtModulePath\microsoft.sharepoint.client.dll",
             "$spmtModulePath\microsoft.sharepoint.client.runtime.dll",
@@ -253,7 +231,16 @@ function PatchSpmt() {
             "methodPrefix" = [SpmtModifications].GetMethod("ProcessRecordPrefix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
             "methodPostfix" = $null
         }
+        @{
+            "origName" = "CanCreateOnPremClientContext"
+            "methodOrig" = [HarmonyLib.AccessTools]::Method([HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.Common.MIGUtilities"), "CanCreateOnPremClientContext")
+            "methodPrefix" = $null
+            "methodPostfix" = [SpmtModifications].GetMethod("CanCreateOnPremClientContextPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
+        }
     )
+
+#    $t = [HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SharePointContext").GetMember(".ctor")[0]
+#    $t.
     # patch all logging methods as well
     $logTypes = "Information", "Error", "Warning", "Exception", "Debug", "Verbose"
     foreach ($logType in $logTypes) {
