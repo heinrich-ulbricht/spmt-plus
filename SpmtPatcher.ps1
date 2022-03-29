@@ -238,9 +238,6 @@ function PatchSpmt() {
             "methodPostfix" = [SpmtModifications].GetMethod("CanCreateOnPremClientContextPostfix", [System.Reflection.BindingFlags]::Static + [System.Reflection.BindingFlags]::Public)
         }
     )
-
-#    $t = [HarmonyLib.AccessTools]::TypeByName("Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint.SharePointContext").GetMember(".ctor")[0]
-#    $t.
     # patch all logging methods as well
     $logTypes = "Information", "Error", "Warning", "Exception", "Debug", "Verbose"
     foreach ($logType in $logTypes) {

@@ -1,18 +1,20 @@
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
+using Microsoft.SharePoint.Client;
+using Microsoft.SharePoint.Migration.Common;
+using Microsoft.SharePoint.Migration.Common.Exceptions;
 using Microsoft.SharePoint.MigrationTool.MigrationLib.Common;
+using Microsoft.SharePoint.MigrationTool.MigrationLib.Log;
+using Microsoft.SharePoint.MigrationTool.MigrationLib.Schema;
+using Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint;
+using Microsoft.SharePoint.MigrationTool.PowerShell;
+using System;
 using System.Collections.Generic;
 using System.IO;
-using Microsoft.SharePoint.MigrationTool.MigrationLib.Log;
 using System.Linq;
-using System;
-using Microsoft.SharePoint.MigrationTool.MigrationLib.SharePoint;
-using Microsoft.SharePoint.MigrationTool.MigrationLib.Schema;
-using Microsoft.SharePoint.Client;
-using System.Text.RegularExpressions;
-using Microsoft.SharePoint.MigrationTool.PowerShell;
 using System.Net;
 using System.Security;
+using System.Text.RegularExpressions;
 
 public class SpmtModifications
 {
@@ -193,7 +195,7 @@ public class SpmtModifications
         Log("[HEU] CreateClientContextPostfix for site '{0}' returns type {1}", siteUrl, __result.GetType().ToString());
     }
 
-    private static UserContext CreateUserContextForSite(
+    private static UserContext Heu_CreateUserContextForSite(
         string siteUrl)
     {
         NetworkCredential sourceCred;
@@ -230,7 +232,7 @@ public class SpmtModifications
         if (userContext == null)
         {
             Log("[HEU] CreateClientContextPrefix: creating userContext for site '{0}'", siteUrl);
-            userContext = CreateUserContextForSite(siteUrl);
+            userContext = Heu_CreateUserContextForSite(siteUrl);
         }
     }
 
@@ -274,7 +276,7 @@ public class SpmtModifications
             {
                 Log("[HEU] Creating user context for " + site);
 
-                userContext = CreateUserContextForSite(site);
+                userContext = Heu_CreateUserContextForSite(site);
 
             }
         }
@@ -287,6 +289,11 @@ public class SpmtModifications
     public static void SharePointContext_CreateContextPrefix(
         SharePointContext __instance)
     {
+        if (!EnableSharePointOnlineAsSource)
+        {
+            return;
+        }
+
         Log("[HEU] SharePointContext_CreateContextPrefix: setting SharePointAuthentication to null");
 
         Log("[HEU] SharePointContext_CreateContextPrefix: GetCredentialsUser() " + __instance.GetCredentialsUser());
@@ -341,7 +348,7 @@ public class SpmtModifications
     }
 
 
-    private static string GetResource(string resourceURI, bool isExternalProvidedURI)
+    private static string Heu_GetResource(string resourceURI, bool isExternalProvidedURI)
     {
         UriBuilder uriBuilder;
         try
@@ -408,7 +415,7 @@ public class SpmtModifications
 
         string[] scopes = new string[1]
         {
-            string.Format("{0}/.default", (object) GetResource(resourceURI, isExternalProvidedURI))
+            string.Format("{0}/.default", Heu_GetResource(resourceURI, isExternalProvidedURI))
         };
         try
         {
@@ -419,10 +426,10 @@ public class SpmtModifications
                     PublicClientApplicationOptions options = new PublicClientApplicationOptions();
                     options.ClientId = "fdd7719f-d61e-4592-b501-793734eb8a0e"; // this is the "new" ID; there is also an old ID in the code which we ignore here; same goes for redirect URI
                     options.LegacyCacheCompatibilityEnabled = true;
-                    ___app = PublicClientApplicationBuilder.CreateWithApplicationOptions(options).WithAuthority(Microsoft.SharePoint.Migration.Common.Office365Endpoints.GetEndpointURI(Microsoft.SharePoint.Migration.Common.EndPointType.AUTHORITY)).WithRedirectUri(new Uri("https://login.microsoftonline.com/common/oauth2/nativeclient").ToString()).Build();
+                    ___app = PublicClientApplicationBuilder.CreateWithApplicationOptions(options).WithAuthority(Office365Endpoints.GetEndpointURI(EndPointType.AUTHORITY)).WithRedirectUri(new Uri("https://login.microsoftonline.com/common/oauth2/nativeclient").ToString()).Build();
                     if (!string.IsNullOrEmpty(___tokenCacheFileName) && !string.IsNullOrEmpty(___tokenCacheDirectory))
                     {
-                        LogManager.PreferedLogger.LogInformation(string.Format("TokenCacheDirectory: {0}, TokenCacheFileName: {1}", (object)___tokenCacheDirectory, (object)___tokenCacheFileName));
+                        LogManager.PreferedLogger.LogInformation(string.Format("TokenCacheDirectory: {0}, TokenCacheFileName: {1}", ___tokenCacheDirectory, ___tokenCacheFileName));
                         if (System.IO.File.Exists(Path.Combine(___tokenCacheDirectory, ___tokenCacheFileName)))
                             LogManager.PreferedLogger.LogInformation("TokenCache file exists and will be loaded.");
                         else
@@ -439,7 +446,7 @@ public class SpmtModifications
                 Log("[HEU] Found authenticated account for user name {0}", username);
                 try
                 {
-                    __result = (IADAuthToken)new AADAuthToken(___app.AcquireTokenSilent((IEnumerable<string>)scopes, account).ExecuteAsync().Result);
+                    __result = new AADAuthToken(___app.AcquireTokenSilent(scopes, account).ExecuteAsync().Result);
                     return false;
                 }
                 catch (MsalUiRequiredException)
@@ -454,17 +461,17 @@ public class SpmtModifications
             if (!string.IsNullOrEmpty(username) && password != null)
             {
                 LogManager.PreferedLogger.LogDebug("Acquire token by username password");
-                __result = (IADAuthToken)new AADAuthToken(___app.AcquireTokenByUsernamePassword((IEnumerable<string>)scopes, username, password).ExecuteAsync().Result);
+                __result = new AADAuthToken(___app.AcquireTokenByUsernamePassword(scopes, username, password).ExecuteAsync().Result);
                 return false;
             }
             LogManager.PreferedLogger.LogDebug("Acquire token by interaction");
             Console.WriteLine("Login for resource {0} and username {1}", resourceURI, username);
-            __result = (IADAuthToken)new AADAuthToken(___app.AcquireTokenInteractive((IEnumerable<string>)scopes).ExecuteAsync().Result);
+            __result = new AADAuthToken(___app.AcquireTokenInteractive(scopes).ExecuteAsync().Result);
             return false;
         }
         catch (AggregateException ex)
         {
-            LogManager.PreferedLogger.LogException((Exception)ex, "Error happened in AAD login");
+            LogManager.PreferedLogger.LogException(ex, "Error happened in AAD login");
             throw new AADAuthenticationException(ex.InnerException);
         }
     }
@@ -521,7 +528,7 @@ public class SpmtModifications
         if (userContext == null)
         {
             // note: a valid user context does not seem to matter here...
-            userContext = CreateUserContextForSite(siteUri);
+            userContext = Heu_CreateUserContextForSite(siteUri);
 
         }
     }
@@ -573,7 +580,7 @@ public class SpmtModifications
         Log("[HEU] Skipping schema mismatch check");
         if (targetList.ListTemplateType != sourceList.ListTemplateType)
         {
-            Log("[HEU] Using the target document library type {0} instead of the default {1} for list {2}", (object)targetList.ListTemplateType, (object)sourceList.ListTemplateType, (object)targetList.Url);
+            Log("[HEU] Using the target document library type {0} instead of the default {1} for list {2}", targetList.ListTemplateType, sourceList.ListTemplateType, targetList.Url);
             sourceList.ListTemplateType = targetList.ListTemplateType;
         }
 
@@ -607,7 +614,7 @@ public class SpmtModifications
     }
 
     // create instance of class with internal constructor
-    public static T CreateInstance<T>(params object[] args)
+    public static T Heu_CreateInstance<T>(params object[] args)
     {
         var type = typeof(T);
         var instance = type.Assembly.CreateInstance(
@@ -629,7 +636,7 @@ public class SpmtModifications
         Log("[HEU] OpenBinaryDirectPrefix for " + serverRelativeUrl);
         // seems like we cannot use the provided "context" variable because the auth header there is missing; unclear why - so create a new context
         var clientContext = MIGUtilities.CreateClientContext(null, null, context.Url); ;
-        var mStreamFromSpo = MIGUtilities.RunWithRetry((Func<MemoryStream>)(() =>
+        var mStreamFromSpo = MIGUtilities.RunWithRetry(() =>
         {
             var file = clientContext.Web.GetFileByServerRelativeUrl(serverRelativeUrl);
             clientContext.Load(file);
@@ -647,9 +654,9 @@ public class SpmtModifications
             mStream.Seek(0, SeekOrigin.Begin);
             Log("[HEU] OpenBinaryDirectPrefix: Memory stream length " + mStream.Length);
             return mStream;
-        }), true, 3, 5, 20, "", typeof(Microsoft.SharePoint.Migration.Common.Exceptions.WebExceptionBase));
+        }, true, 3, 5, 20, "", typeof(WebExceptionBase));
 
-        __result = CreateInstance<FileInformation>(mStreamFromSpo, Guid.NewGuid().ToString());
+        __result = Heu_CreateInstance<FileInformation>(mStreamFromSpo, Guid.NewGuid().ToString());
         while (context.HasPendingRequest)
         {
             context.ExecuteQuery();
@@ -798,5 +805,52 @@ public class SpmtModifications
     public static void LogExceptionPrefix(Exception e, string errorMessage = "", params object[] messageArgs)
     {
         Log("[EXC] " + errorMessage + " (" + e.ToString() + ")", messageArgs);
+    }
+
+    public static IFolder Heu_EnsureFolderExistance(string targetWebUrl, string targetDocLib, string targetSubFolder)
+    {
+        var ctx = MIGUtilities.CreateClientContext(null, null, targetWebUrl);
+        return MIGUtilities.RunWithRetry(() =>
+        {
+            var web = ctx.Web;
+            // "Dokumente"
+            var list = web.Lists.GetByTitle(targetDocLib);
+            ctx.Load(list, l => l.RootFolder);
+            ctx.ExecuteQuery();
+
+            // "Freigegebene Dokumente"
+            var rootFolderName = list.RootFolder.Name;
+            // "/sites/test/Freigegebene Dokumente"
+            var rootFolderUrl = list.RootFolder.ServerRelativeUrl;
+            var targetSubFolderPathParts = targetSubFolder.Split('/');
+
+            var parentFolder = list.RootFolder;
+            var folderToCheckUrl = rootFolderUrl;
+            foreach (var folderName in targetSubFolderPathParts)
+            {
+                folderToCheckUrl += "/" + folderName;
+                Log("[HEU] Checking existance of folder {0}", folderToCheckUrl);
+                var folder = web.GetFolderByServerRelativeUrl(folderToCheckUrl);
+                ctx.Load(folder);
+                try
+                {
+                    ctx.ExecuteQuery();
+                    Log("[HEU] Folder exists: {0}", folderName);
+                }
+                catch (MigSPNotFoundException)
+                {
+                    Log("[HEU] Did not find it. Creating folder {0}", folderName);
+                    parentFolder.Folders.Add(folderName);
+                    ctx.ExecuteQuery();
+                    folder = web.GetFolderByServerRelativeUrl(folderToCheckUrl);
+                    ctx.ExecuteQuery();
+                    Log("[HEU] Successfully created folder at {0}", folderToCheckUrl);
+                }
+                parentFolder = folder;
+            }
+            return list.RootFolder;
+
+            //ctx.Web.GetFolderByServerRelativePath(ResourcePath.FromDecodedUrl)
+        }, true, 3, 5, 20, "", typeof(WebExceptionBase));
     }
 }
